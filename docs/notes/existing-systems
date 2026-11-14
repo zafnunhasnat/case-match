@@ -1,0 +1,110 @@
+# Existing Clinical Search Systems
+
+## 1. EMERSE
+
+**EMERSE (Electronic Medical Record Search Engine)** is a clinical search tool designed to help researchers and healthcare professionals search free-text documents stored in electronic health records (EHRs).
+
+It allows users to search clinical documentation using keywords, phrases, and search-term combinations. Its architecture uses Apache Solr to index documents and retrieve relevant results. It also supports features such as search-term bundles and exclusion terms.
+
+**What it does well:**
+- Searches large collections of free-text clinical documents.
+- Supports flexible keyword and phrase searches.
+- Allows users to exclude unwanted terms from searches.
+- Helps researchers identify relevant patient records and clinical information.
+
+**How CaseMatch differs:**
+
+CaseMatch explores a workflow focused on finding historically similar clinical cases rather than primarily searching for documents containing specified terms. Its intended approach combines similarity-based retrieval with access to the exact original documentation and clear source provenance.
+
+EMERSE already provides access to clinical documents, so CaseMatch should not claim that displaying original documentation is entirely new. The distinction we want to explore is how similarity matches are presented and explained to clinicians.
+
+## 2. SemEHR
+
+**SemEHR (Semantic Search Engine for Electronic Health Records)** is a system that applies natural language processing (NLP) and medical terminology resources to clinical documentation.
+
+It identifies medical concepts in clinical notes and uses contextual information to interpret those concepts. For example, it can recognize whether a condition is negated, historical, or associated with someone other than the patient.
+
+Its architecture includes three major components:
+
+- **Producing subsystem:** Retrieves clinical documents, processes them with NLP, and generates structured clinical information.
+- **Continuous learning subsystem:** Supports adaptation and improvement for particular research tasks.
+- **Consuming subsystem:** Provides interfaces for searching and exploring the extracted clinical information.
+
+SemEHR connects extracted medical concepts to their original clinical documentation, allowing users to investigate where information came from.
+
+**What it does well:**
+- Identifies medical concepts in unstructured clinical notes.
+- Handles contextual information such as negation, temporality, and experiencer.
+- Connects extracted concepts to their source documentation.
+- Supports semantic search over clinical information.
+
+**How CaseMatch differs:**
+
+CaseMatch explores similarity-based retrieval of historical clinical cases, with an emphasis on presenting the original wording and provenance alongside each result.
+
+SemEHR demonstrates that semantic clinical search and contextual NLP already exist. Therefore, CaseMatch's potential contribution is not simply identifying medical concepts, but combining case similarity, original documentation, and transparent explanations of why a case was retrieved.
+
+## 3. HL7 FHIR
+
+**HL7 FHIR (Fast Healthcare Interoperability Resources)** is a healthcare interoperability standard. It defines a common way for healthcare applications to represent and exchange clinical information.
+
+FHIR organizes information into resources such as:
+
+- Patient
+- Encounter
+- Observation
+- Condition
+- DocumentReference
+
+These resources allow different healthcare systems and applications to exchange information using standardized structures and interfaces.
+
+**What it does well:**
+- Provides standardized formats for healthcare information.
+- Supports interoperability between different healthcare applications.
+- Defines common resources for clinical and administrative data.
+- Provides a foundation for exchanging information through APIs.
+
+**How CaseMatch differs:**
+
+FHIR is not itself a clinical search engine or a case-similarity retrieval system. It provides standards that applications can use to exchange healthcare information.
+
+CaseMatch could potentially use FHIR in the future to integrate with systems that expose clinical information through FHIR APIs.
+
+## 4. Where CaseMatch Fits
+
+Existing systems demonstrate that clinical document search, semantic retrieval, medical concept extraction, and healthcare interoperability are already established areas of research and development.
+
+CaseMatch does not aim to replace an electronic health record system or claim to invent semantic clinical search.
+
+Instead, CaseMatch explores a particular workflow: helping clinicians retrieve historically similar cases while preserving access to the exact original documentation and its provenance.
+
+The intended design focuses on four areas:
+
+1. **Similarity-based retrieval:** Finding historical cases based on clinical similarity rather than relying exclusively on exact keyword matches.
+2. **Original documentation:** Showing the exact wording from the source clinical notes instead of relying only on generated summaries or extracted medical concepts.
+3. **Document provenance:** Making it clear which document and source information support a retrieved result.
+4. **Clinical context:** Accounting for negation and other contextual details so that a condition mentioned as absent or historical is not incorrectly treated as a current positive finding.
+
+These are design goals for CaseMatch, not claims that every capability has already been implemented or that existing systems lack them.
+
+The potential distinction is the combination of these capabilities in a clinician-facing historical case retrieval workflow.
+
+## 5. Open Design Questions
+
+Before implementing the full system, several questions need further consideration:
+
+1. **Match explanations:** How should CaseMatch explain why a particular historical case matched a clinician's search?
+2. **Negation:** How can the system distinguish between a condition that is present and one explicitly documented as absent?
+3. **Temporality:** How should the system distinguish current conditions from historical conditions?
+4. **Original wording:** How can we preserve the exact wording of clinical notes while protecting patient-identifying information?
+5. **Provenance:** What source information should be displayed for each result, such as document type, author, timestamp, and encounter?
+6. **Similarity scoring:** Should CaseMatch use embeddings, keyword matching, medical terminology, or a combination of these approaches?
+7. **Conflicting documentation:** How should the system handle different clinical notes that contain conflicting information?
+8. **Access control:** How can we ensure users only retrieve historical cases they are authorized to access?
+
+## References
+
+1. Hanauer et al. (2015). EMERSE: The Electronic Medical Record Search Engine. *Journal of Biomedical Informatics*. https://doi.org/10.1016/j.jbi.2015.05.003
+2. EMERSE Project. Architecture Guide. https://project-emerse.org/documentation/architecture_guide.html
+3. Wu et al. (2018). SemEHR: A General-purpose Semantic Search Engine for Electronic Health Records. *Journal of the American Medical Informatics Association*. https://doi.org/10.1093/jamia/ocx160
+4. HL7. FHIR Overview. https://hl7.org/fhir/overview.html
