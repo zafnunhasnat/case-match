@@ -1,0 +1,471 @@
+========== COMPLETE QUERY PARSER ==========
+
+import re
+
+import spacy
+from pydantic import BaseModel, Field
+
+from backend.app.services.terminology import normalize
+
+
+# Load spaCy
+nlp = spacy.load("en_core_web_sm")
+
+
+# Words that should not be treated as clinical findings
+FILLER_WORDS = {
+    "patient", "patients",
+    "has", "have", "had",
+    "reports", "report", "reported",
+    "experiences", "experiencing",
+    "with", "the", "a", "an",
+    "is", "was", "were",
+    "of", "for", "and", "or", "but",
+    "no", "not", "denies", "denied",
+    "without", "negative"
+}
+
+
+NUMBER_WORDS = {
+    "one": "1", "two": "2", "three": "3",
+    "four": "4", "five": "5", "six": "6",
+    "seven": "7", "eight": "8", "nine": "9",
+    "ten": "10", "eleven": "11", "twelve": "12",
+    "thirteen": "13", "fourteen": "14",
+    "fifteen": "15", "twenty": "20",
+    "thirty": "30"
+}
+
+
+DURATION_PATTERN = re.compile(
+    r"\b(\d+|one|two|three|four|five|six|seven|eight|nine|"
+    r"ten|eleven|twelve|thirteen|fourteen|fifteen|twenty|thirty)"
+    r"\s+(hours?|days?|weeks?|months?|years?)\b",
+    re.IGNORECASE
+)
+
+
+NEGATION_PATTERN = re.compile(
+    r"\b(no|not|denies|denied|without|negative\s+for)\b",
+    re.IGNORECASE
+)
+
+
+class Finding(BaseModel):
+    text: str
+    concept: str | None
+    synonyms: list[str] = Field(default_factory=list)
+    excluded: bool = False
+
+
+class ParsedQuery(BaseModel):
+    findings: list[Finding]
+    duration: str | None = None
+
+
+def extract_duration(text: str):
+    match = DURATION_PATTERN.search(text)
+
+    if match:
+        amount = match.group(1).lower()
+        amount = NUMBER_WORDS.get(amount, amount)
+
+        return f"{amount} {match.group(2).lower()}"
+
+    return None
+
+
+def extract_candidates(text: str):
+    """
+    Find clinical terms directly in the sentence.
+
+    Checks longer phrases first so that terms such as
+    'shortness of breath' are not split into separate words.
+    """
+
+    cleaned = DURATION_PATTERN.sub("", text)
+
+    doc = nlp(cleaned)
+    tokens = [
+        token for token in doc
+        if not token.is_punct and not token.is_space
+    ]
+
+    candidates = []
+    occupied = set()
+
+    # Check phrases containing up to five words.
+    for size in range(5, 0, -1):
+        for start in range(len(tokens) - size + 1):
+            positions = set(range(start, start + size))
+
+            if positions & occupied:
+                continue
+
+            phrase = doc[tokens[start].i:tokens[start + size - 1].i + 1].text.strip()
+
+            # Skip grammatical filler words as standalone findings.
+            if phrase.lower() in FILLER_WORDS:
+                continue
+
+            concept = normalize(phrase)
+
+            if concept is not None:
+                candidates.append(phrase)
+                occupied.update(positions)
+
+    return candidates
+
+
+def is_negated(text: str, finding: str):
+    """
+    Determine whether a finding is negated.
+
+    Examples:
+    No cough -> True
+    No cough but reports fatigue -> cough=True
+    Denies nausea and vomiting -> both=True
+    """
+
+    finding_match = re.search(
+        re.escape(finding),
+        text,
+        re.IGNORECASE
+    )
+
+    if not finding_match:
+        return False
+
+    prefix = text[:finding_match.start()]
+
+    # Find the most recent negation.
+    negations = list(NEGATION_PATTERN.finditer(prefix))
+
+    if not negations:
+        return False
+
+    last_negation = negations[-1]
+
+    # A contrast word ends the negation scope.
+    after_negation = prefix[last_negation.end():]
+
+    if re.search(r"\bbut\b", after_negation, re.IGNORECASE):
+        return False
+
+    return True
+
+
+def parse_query(text: str) -> ParsedQuery:
+
+    duration = extract_duration(text)
+
+    candidates = extract_candidates(text)
+
+    findings = []
+    seen = set()
+
+    for candidate in candidates:
+
+        candidate_doc = nlp(candidate)
+
+        words = [
+            token.text
+            for token in candidate_doc
+            if token.text.lower() not in FILLER_WORDS
+            and not token.is_punct
+            and not token.is_space
+        ]
+
+        phrase = " ".join(words).strip()
+
+        if not phrase or len(phrase) < 3:
+            continue
+
+        concept = normalize(phrase)
+
+        if concept is None:
+            continue
+
+        key = concept.lower()
+
+        if key in seen:
+            continue
+
+        seen.add(key)
+
+        findings.append(
+            Finding(
+                text=phrase,
+                concept=concept,
+                synonyms=[phrase],
+                excluded=is_negated(text, phrase)
+            )
+        )
+
+    return ParsedQuery(
+        findings=findings,
+        duration=duration
+    )
+
+
+# Compatibility alias
+parse_clinical_query = parse_query
+========== COMPLETE TERMINOLOGY SERVICE ==========
+import csv
+from pathlib import Path
+
+import spacy
+from rapidfuzz import process, fuzz
+from sqlalchemy.orm import Session
+
+from backend.app.models.term import ClinicalTerm
+
+try:
+    nlp = spacy.load("en_core_web_sm")
+except OSError:
+    nlp = spacy.blank("en")
+
+CSV_PATH = Path(__file__).resolve().parents[3] / "data" / "terminology" / "terms.csv"
+
+
+def clean_phrase(phrase: str) -> str:
+    doc = nlp(phrase.lower().strip())
+    words = [
+        token.lemma_.lower() if token.lemma_ else token.text.lower()
+        for token in doc
+        if not token.is_punct and not token.is_space
+    ]
+    return " ".join(words)
+
+
+def load_csv_terms():
+    with CSV_PATH.open("r", encoding="utf-8") as file:
+        return list(csv.DictReader(file))
+
+
+def normalize(phrase: str, db: Session | None = None):
+    cleaned = clean_phrase(phrase)
+
+    if db is not None:
+        terms = db.query(ClinicalTerm).all()
+        records = [
+            {
+                "preferred_term": term.preferred_term,
+                "synonym": term.synonym,
+                "abbreviation": term.abbreviation or "",
+                "terminology_code": term.terminology_code or "",
+            }
+            for term in terms
+        ]
+    else:
+        records = load_csv_terms()
+
+    for record in records:
+        candidates = [
+            record["preferred_term"].lower(),
+            record["synonym"].lower(),
+        ]
+        if record.get("abbreviation"):
+            candidates.append(record["abbreviation"].lower())
+
+        if cleaned in candidates or phrase.lower().strip() in candidates:
+            return record["preferred_term"]
+
+    choices = {}
+    for record in records:
+        for candidate in (
+            record["preferred_term"],
+            record["synonym"],
+            record.get("abbreviation", ""),
+        ):
+            if candidate:
+                choices[candidate.lower()] = record["preferred_term"]
+
+    match = process.extractOne(cleaned, choices.keys(), scorer=fuzz.ratio)
+
+    if match and match[1] >= 90:
+        return choices[match[0]]
+
+    return None
+========== COMPLETE PARSER TESTS ==========
+import pytest
+
+from backend.app.services.query_parser import parse_query
+
+
+@pytest.mark.parametrize(
+    "query, expected",
+    [
+        (
+            "Patient has shortness of breath and chest pain",
+            ["dyspnea", "chest pain"],
+        ),
+        (
+            "Patient reports fever for 3 days",
+            ["fever"],
+        ),
+        (
+            "No cough but reports fatigue",
+            ["cough", "fatigue"],
+        ),
+        (
+            "Denies nausea and vomiting",
+            ["nausea", "vomiting"],
+        ),
+        (
+            "Hypertension with headache",
+            ["hypertension", "headache"],
+        ),
+        (
+            "Patient has diabetes",
+	    ["diabetes mellitus"],
+        ),
+        (
+            "Patient reports dizziness for two weeks",
+            ["dizziness"],
+        ),
+        (
+            "No fever or cough",
+            ["fever", "cough"],
+        ),
+        (
+            "Patient has abdominal pain and nausea",
+            ["abdominal pain", "nausea"],
+        ),
+        (
+            "Patient reports fatigue for 5 days",
+            ["fatigue"],
+        ),
+    ],
+)
+def test_parse_query(query, expected):
+    result = parse_query(query)
+
+    concepts = [
+        finding.concept.lower()
+        for finding in result.findings
+    ]
+
+    for concept in expected:
+        assert concept in concepts
+
+
+def test_duration_extraction():
+    result = parse_query("Patient reports fever for 3 days")
+
+    assert result.duration == "3 days"
+
+
+def test_word_duration_extraction():
+    result = parse_query("Patient reports dizziness for two weeks")
+
+    assert result.duration == "2 weeks"
+
+
+def test_negation():
+    result = parse_query("No cough but reports fatigue")
+
+    findings = {
+        finding.concept.lower(): finding.excluded
+        for finding in result.findings
+    }
+
+    assert findings["cough"] is True
+    assert findings["fatigue"] is False
+
+
+def test_denies_multiple_findings():
+    result = parse_query("Denies nausea and vomiting")
+
+    findings = {
+        finding.concept.lower(): finding.excluded
+        for finding in result.findings
+    }
+
+    assert findings["nausea"] is True
+    assert findings["vomiting"] is True
+========== NEGATION TESTS ==========
+========== TERMINOLOGY MODEL ==========
+from sqlalchemy import String
+from sqlalchemy.orm import Mapped, mapped_column
+
+from backend.app.database.connection import Base
+
+
+class ClinicalTerm(Base):
+    __tablename__ = "clinical_terms"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    preferred_term: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    synonym: Mapped[str] = mapped_column(String(255), nullable=False, unique=True, index=True)
+    abbreviation: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    terminology_code: Mapped[str | None] = mapped_column(String(100), nullable=True)
+========== DEPENDENCY FILES ==========
+./backend/requirements.txt
+========== INSTALLED RELEVANT PACKAGES ==========
+Name: medspacy
+Version: 1.3.1
+Summary: Library for clinical NLP with spaCy.
+Home-page: 
+Author: medSpaCy
+Author-email: 
+License: MIT License
+
+Copyright (c) 2020 medspacy
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+Location: /Users/zahra/Desktop/case-match/.venv/lib/python3.13/site-packages
+Requires: jsonschema, medspacy_quickumls, PyRuSH, pysbd, spacy
+Required-by: 
+---
+Name: spacy
+Version: 3.8.18
+Summary: Industrial-strength Natural Language Processing (NLP) in Python
+Home-page: https://spacy.io
+Author: Explosion
+Author-email: contact@explosion.ai
+License: MIT
+Location: /Users/zahra/Desktop/case-match/.venv/lib/python3.13/site-packages
+Requires: catalogue, click, confection, cymem, jinja2, murmurhash, numpy, packaging, preshed, pydantic, requests, setuptools, spacy-legacy, spacy-loggers, srsly, thinc, tqdm, typer, wasabi, weasel
+Required-by: medspacy, medspacy_quickumls, presidio_analyzer, PyRuSH
+---
+Name: RapidFuzz
+Version: 3.14.6
+Summary: rapid fuzzy string matching
+Home-page: https://github.com/rapidfuzz/RapidFuzz
+Author: 
+Author-email: Max Bachmann <pypi@maxbachmann.de>
+License-Expression: MIT
+Location: /Users/zahra/Desktop/case-match/.venv/lib/python3.13/site-packages
+Requires: 
+Required-by: 
+---
+Name: pydantic
+Version: 2.14.3
+Summary: Data validation using Python type hints
+Home-page: https://github.com/pydantic/pydantic
+Author: 
+Author-email: Samuel Colvin <s@muelcolvin.com>, Eric Jolibois <em.jolibois@gmail.com>, Hasan Ramezani <hasan.r67@gmail.com>, Adrian Garcia Badaracco <1755071+adriangb@users.noreply.github.com>, Terrence Dorsey <terry@pydantic.dev>, David Montague <david@pydantic.dev>, Serge Matveenko <lig@countzero.co>, Marcelo Trylesinski <marcelotryle@gmail.com>, Sydney Runkle <sydneymarierunkle@gmail.com>, David Hewitt <mail@davidhewitt.dev>, Alex Hall <alex.mojaki@gmail.com>, Victorien Plot <contact@vctrn.dev>
+License-Expression: MIT
+Location: /Users/zahra/Desktop/case-match/.venv/lib/python3.13/site-packages
+Requires: annotated-types, pydantic-core, typing-extensions, typing-inspection
+Required-by: fastapi, presidio_analyzer, pydantic-settings, spacy, thinc, typer, weasel
+========== PROJECT REQUIREMENTS / ASSIGNMENT DOCS ==========
+./backend/requirements.txt

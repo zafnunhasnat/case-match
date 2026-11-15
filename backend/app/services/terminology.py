@@ -97,8 +97,13 @@ def lookup_exact(phrase: str) -> Concept | None:
     return _make(pref, phrase, "exact", 100.0) if pref else None
 
 
-def normalize(phrase: str) -> Concept | None:
-    """lowercase -> lemma -> exact lookup -> rapidfuzz fallback (threshold 90)."""
+def normalize(phrase: str, db=None) -> Concept | None:
+    """lowercase -> lemma -> exact lookup -> rapidfuzz fallback (threshold 90).
+
+    `db` is accepted so older calls like normalize(phrase, db) still work. It is
+    currently ignored: terms.csv is the single source of truth until the loader
+    that fills the clinical_terms table is the one used at search time.
+    """
     concept = lookup_exact(phrase)
     if concept:
         return concept
