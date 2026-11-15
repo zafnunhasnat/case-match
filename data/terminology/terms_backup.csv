@@ -1,0 +1,18 @@
+preferred_term,synonym,abbreviation,terminology_code
+dyspnea,shortness of breath,SOB,267036007
+dyspnea,difficulty breathing,,267036007
+chest pain,chest discomfort,CP,29857009
+fever,pyrexia,,386661006
+fever,high temperature,,386661006
+cough,coughing,,49727002
+fatigue,tiredness,,84229001
+fatigue,exhaustion,,84229001
+nausea,feeling sick,,422587007
+vomiting,emesis,,249497008
+headache,cephalalgia,HA,25064002
+hypertension,high blood pressure,HTN,38341003
+diabetes mellitus,diabetes,DM,73211009
+dizziness,lightheadedness,,404640003
+dizziness,vertigo,,404640003
+abdominal pain,stomach ache,,21522001
+abdominal pain,belly pain,,21522001
