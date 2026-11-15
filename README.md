@@ -40,3 +40,9 @@ Then set `DATABASE_URL=postgresql+psycopg://YOUR_USERNAME@localhost:5432/casemat
 CaseMatch builds on existing research in clinical information retrieval and healthcare interoperability. Systems such as [EMERSE](https://project-emerse.org/), developed for searching free-text electronic medical records, and [SemEHR](https://doi.org/10.1093/jamia/ocx160), which applies natural language processing and medical ontologies to semantic clinical search, demonstrate established approaches to retrieving information from clinical documentation. [HL7 FHIR](https://hl7.org/fhir/overview.html) provides standardized resources for exchanging healthcare information across applications.
 
 CaseMatch explores a complementary workflow focused on similarity-based retrieval of historical clinical cases, preserving exact original documentation, and presenting explicit document provenance and clinical context alongside search results.
+
+sever command line: 
+cd frontend 
+npm run dev
+
+link: http://localhost:5175/
