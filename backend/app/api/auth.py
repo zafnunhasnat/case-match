@@ -1,10 +1,11 @@
+
 import uuid
 
 import jwt
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from app.database.connection import get_db
@@ -114,3 +115,29 @@ def require_admin(
         )
 
     return current_user
+
+
+def log_audit_event(
+    db: Session,
+    username: str,
+    action: str,
+    details: str,
+    ip_address: str,
+):
+    audit_sql = text("""
+        INSERT INTO search_audit_logs
+        (username, action, details, ip_address, timestamp)
+        VALUES (:username, :action, :details, :ip_address, NOW())
+    """)
+
+    db.execute(
+        audit_sql,
+        {
+            "username": username,
+            "action": action,
+            "details": details,
+            "ip_address": ip_address,
+        },
+    )
+    db.commit()
+
