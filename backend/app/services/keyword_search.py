@@ -1,181 +1,176 @@
+"""Keyword search over approved documents (Postgres full-text search).
+
+One tsquery per finding, built by OR-ing its synonyms, so a finding counts once
+however many synonyms match. All user text goes in as bound parameters.
+No LIMIT: the promise is every relevant case.
+
+Runs on the restricted application connection (SessionLocal), never the admin
+one, and reads only approved, privacy-screened text.
+"""
+from __future__ import annotations
+
 import re
-from typing import Any, Dict, List, Optional
+from datetime import date
+from typing import Literal
+
 from pydantic import BaseModel
 from sqlalchemy import text
+from sqlalchemy.orm import Session
+
 from backend.app.database.connection import SessionLocal
+from backend.app.services.query_parser import ParsedQuery
 
+HEADLINE_OPTIONS = "MaxFragments=2"
 
-class Candidate(BaseModel):
-    document_id: int
-    matched_findings: List[str]
-    total_findings: int
-    matched_via: str  # "exact" or "synonym"
-    snippets: List[str]
+# The ONE place that decides what is searchable. Approved, screened text only.
+# If your column or table names differ, change them here and nowhere else.
+SEARCHABLE_SQL = """
+SELECT
+    sd.id               AS id,
+    sd.screened_text    AS screened_text,
+    sd.search_vector    AS search_vector,
+    cd.department       AS department,
+    cd.document_type    AS document_type,
+    cd.created_at       AS document_date
+FROM screened_documents sd
+JOIN clinical_documents cd ON cd.id = sd.clinical_document_id
+WHERE sd.screening_status = 'approved'
+"""
 
 
 def get_searchable_documents() -> str:
-    """Base SQL restricting all searches to approved clinical documents only."""
+    """SQL for approved, screened documents. Every search reads through this."""
+    return SEARCHABLE_SQL
+
+
+class SearchFilters(BaseModel):
+    department: str | None = None
+    document_type: str | None = None
+    date_from: date | None = None
+    date_to: date | None = None
+
+
+class Candidate(BaseModel):
+    document_id: str  # ids are UUIDs, so keep them as strings
+    title: str | None = None
+    department: str | None = None
+    document_type: str | None = None
+    document_date: date | None = None
+    matched_findings: int
+    total_findings: int
+    matched_texts: list[str]
+    matched_via: Literal["exact", "synonym"]
+    score: float
+    snippets: list[str]
+
+
+def _terms(finding) -> list[str]:
+    """Typed text first, then concept, synonyms and abbreviations (deduplicated)."""
+    seen: set[str] = set()
+    out: list[str] = []
+    for raw in [finding.text, finding.concept, *finding.synonyms]:
+        if not raw:
+            continue
+        term = " ".join(raw.lower().split())
+        if term and re.search(r"\w", term) and term not in seen:
+            seen.add(term)
+            out.append(term)
+    return out
+
+
+def _tsquery_sql(i: int, terms: list[str], params: dict) -> str:
+    """plainto_tsquery per synonym, OR-ed with ||. Only bind names are interpolated."""
+    parts = []
+    for j, term in enumerate(terms):
+        name = f"t{i}_{j}"
+        params[name] = term
+        parts.append(f"plainto_tsquery('english', :{name})")
+    return "(" + " || ".join(parts) + ")"
+
+
+def _filter_sql(filters: SearchFilters, params: dict) -> str:
+    clauses = []
+    if filters.department:
+        params["f_department"] = filters.department
+        clauses.append("d.department = :f_department")
+    if filters.document_type:
+        params["f_document_type"] = filters.document_type
+        clauses.append("d.document_type = :f_document_type")
+    if filters.date_from:
+        params["f_date_from"] = filters.date_from
+        clauses.append("d.document_date >= :f_date_from")
+    if filters.date_to:
+        params["f_date_to"] = filters.date_to
+        clauses.append("d.document_date <= :f_date_to")
+    return "".join(f" AND {c}" for c in clauses)
+
+
+def _build_sql(active: list, filters: SearchFilters, params: dict) -> str:
+    select_cols = []
+    any_match = []
+    for i, finding in enumerate(active):
+        terms = _terms(finding)
+        q = _tsquery_sql(i, terms, params)
+        params[f"x{i}"] = terms[0]
+        select_cols += [
+            f"(d.search_vector @@ {q}) AS m{i}",
+            f"(d.search_vector @@ plainto_tsquery('english', :x{i})) AS e{i}",
+            f"CASE WHEN d.search_vector @@ {q} "
+            f"THEN ts_rank(d.search_vector, {q}) ELSE 0 END AS r{i}",
+            f"CASE WHEN d.search_vector @@ {q} "
+            f"THEN ts_headline('english', d.screened_text, {q}, '{HEADLINE_OPTIONS}') "
+            f"END AS h{i}",
+        ]
+        any_match.append(f"d.search_vector @@ {q}")
     return (
-        "SELECT id, screened_text, department, doc_type, created_at, status, search_vector "
-        "FROM clinical_documents WHERE status = 'approved'"
+        "SELECT d.id AS document_id, d.department, d.document_type, "
+        "d.document_date, " + ", ".join(select_cols) + " "
+        f"FROM ({get_searchable_documents()}) d "
+        "WHERE (" + " OR ".join(any_match) + ")" + _filter_sql(filters, params)
     )
 
 
-def _format_ts_term(term: str) -> str:
-    """Sanitizes a clinical phrase into a safe tsquery token or AND-group."""
-    cleaned = re.sub(r"[^a-zA-Z0-9\s]", "", term).strip().lower()
-    words = cleaned.split()
-    if not words:
-        return ""
-    if len(words) == 1:
-        return words[0]
-    return f"({' & '.join(words)})"
-
-
-def _build_finding_tsquery(finding: Any) -> tuple[str, str]:
-    """
-    Builds one OR-ed tsquery per finding (e.g. 'dyspnea | (shortness & breath) | sob')
-    and a separate tsquery for the exact user phrase to distinguish 'exact' vs 'synonym'.
-    """
-    exact_text = getattr(finding, "text", "") or ""
-    concept = getattr(finding, "concept", "") or ""
-    synonyms = getattr(finding, "synonyms", []) or []
-
-    exact_ts = _format_ts_term(exact_text) or _format_ts_term(concept)
-
-    seen = set()
-    parts = []
-    for raw_term in [concept, exact_text, *synonyms]:
-        formatted = _format_ts_term(raw_term)
-        if formatted and formatted not in seen:
-            seen.add(formatted)
-            parts.append(formatted)
-
-    return " | ".join(parts), exact_ts
-
-
 def keyword_search(
-    parsed: Any, filters: Optional[Dict[str, Any]] = None
-) -> List[Candidate]:
-    """
-    Searches approved clinical documents using PostgreSQL full-text search.
-    Counts each finding once regardless of how many synonyms match, uses bound
-    parameters only, applies optional filters, and imposes no LIMIT.
-    """
-    if not parsed or not getattr(parsed, "findings", None):
+    parsed: ParsedQuery,
+    filters: SearchFilters | dict | None = None,
+    db: Session | None = None,
+) -> list[Candidate]:
+    """Return every approved document matching at least one non-excluded finding."""
+    if isinstance(filters, dict):
+        filters = SearchFilters(**filters)
+    filters = filters or SearchFilters()
+
+    active = [f for f in parsed.findings if not f.excluded and _terms(f)]
+    if not active:
         return []
 
-    active_findings = [
-        f for f in parsed.findings if not getattr(f, "excluded", False)
-    ]
-    if not active_findings:
-        return []
+    params: dict = {}
+    sql = _build_sql(active, filters, params)
 
-    filters = filters or {}
-    params: Dict[str, Any] = {}
-    finding_queries: List[tuple[str, str, str]] = []
-
-    for idx, finding in enumerate(active_findings):
-        syn_q, exact_q = _build_finding_tsquery(finding)
-        if syn_q:
-            q_param = f"q_{idx}"
-            e_param = f"exact_{idx}"
-            params[q_param] = syn_q
-            params[e_param] = exact_q or syn_q
-            label = getattr(finding, "concept", None) or getattr(finding, "text", "")
-            finding_queries.append((label, q_param, e_param))
-
-    if not finding_queries:
-        return []
-
-    total_findings = len(finding_queries)
-    combined_q = " | ".join(f"({params[q_p]})" for _, q_p, _ in finding_queries)
-    params["combined_q"] = combined_q
-
-    # Per-finding match flags (each finding counts at most once) and rank sum
-    match_cols = []
-    exact_cols = []
-    rank_terms = []
-    match_conditions = []
-
-    for idx, (_, q_p, e_p) in enumerate(finding_queries):
-        match_cols.append(
-            f"(search_vector @@ to_tsquery('english', :{q_p})) AS matched_{idx}"
-        )
-        exact_cols.append(
-            f"(search_vector @@ to_tsquery('english', :{e_p})) AS exact_{idx}"
-        )
-        rank_terms.append(
-            f"ts_rank(search_vector, to_tsquery('english', :{q_p}))"
-        )
-        match_conditions.append(
-            f"search_vector @@ to_tsquery('english', :{q_p})"
-        )
-
-    where_clauses = [f"({' OR '.join(match_conditions)})"]
-
-    if filters.get("department"):
-        where_clauses.append("department = :department")
-        params["department"] = filters["department"]
-    if filters.get("document_type"):
-        where_clauses.append("doc_type = :document_type")
-        params["document_type"] = filters["document_type"]
-    if filters.get("date_from"):
-        where_clauses.append("created_at >= :date_from")
-        params["date_from"] = filters["date_from"]
-    if filters.get("date_to"):
-        where_clauses.append("created_at <= :date_to")
-        params["date_to"] = filters["date_to"]
-
-    # No LIMIT on final result so every relevant approved case is returned
-    sql = f"""
-        WITH approved_docs AS (
-            {get_searchable_documents()}
-        )
-        SELECT
-            id,
-            ({ ' + '.join(rank_terms) }) AS rank,
-            ts_headline('english', screened_text, to_tsquery('english', :combined_q), 'MaxFragments=2') AS snippet,
-            {', '.join(match_cols)},
-            {', '.join(exact_cols)}
-        FROM approved_docs
-        WHERE {' AND '.join(where_clauses)}
-        ORDER BY rank DESC;
-    """
-
-    db = SessionLocal()
+    own_session = db is None
+    session = db or SessionLocal()
     try:
-        rows = db.execute(text(sql), params).fetchall()
+        rows = session.execute(text(sql), params).mappings().all()
     finally:
-        db.close()
+        if own_session:
+            session.close()
 
-    candidates: List[Candidate] = []
-    num_f = len(finding_queries)
-
-    for row in rows:
-        doc_id = row[0]
-        snippet = row[2]
-        matched_flags = row[3 : 3 + num_f]
-        exact_flags = row[3 + num_f : 3 + 2 * num_f]
-
-        matched_findings = [
-            finding_queries[i][0]
-            for i, is_match in enumerate(matched_flags)
-            if is_match
-        ]
-        any_exact = any(
-            exact_flags[i] for i, is_match in enumerate(matched_flags) if is_match
-        )
-        matched_via = "exact" if any_exact else "synonym"
-
-        candidates.append(
+    results: list[Candidate] = []
+    for r in rows:
+        hit = [i for i in range(len(active)) if r[f"m{i}"]]
+        results.append(
             Candidate(
-                document_id=doc_id,
-                matched_findings=matched_findings,
-                total_findings=total_findings,
-                matched_via=matched_via,
-                snippets=[snippet] if snippet else [],
+                document_id=str(r["document_id"]),
+                department=r["department"],
+                document_type=r["document_type"],
+                document_date=r["document_date"],
+                matched_findings=len(hit),
+                total_findings=len(active),
+                matched_texts=[active[i].text for i in hit],
+                matched_via="exact" if any(r[f"e{i}"] for i in hit) else "synonym",
+                score=sum(float(r[f"r{i}"]) for i in hit),
+                snippets=[r[f"h{i}"] for i in hit if r[f"h{i}"]],
             )
         )
-
-    return candidates
+    results.sort(key=lambda c: (-c.matched_findings, -c.score, c.document_id))
+    return results
