@@ -6,7 +6,7 @@ psycopg[binary]
 pgvector
 pydantic-settings
 pyjwt
-passlib[bcrypt]
+bcrypt>=4.1,<6
 slowapi
 presidio-analyzer
 presidio-anonymizer
@@ -22,3 +22,4 @@ pandas
 matplotlib
 pytest
 httpx
+python-dotenv
