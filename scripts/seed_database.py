@@ -1,55 +1,70 @@
+"""Load data/terminology/terms.csv into the clinical_terms table.
+
+Safe to run more than once: rows that already exist (same preferred_term and
+synonym) are skipped. Uses the admin connection because the restricted app role
+should not be able to write vocabulary data.
+
+Run from the repo root:
+    PYTHONPATH=. python scripts/seed_terms.py
+"""
 import csv
-import os
 from pathlib import Path
 
-from sqlalchemy import create_engine, text
+from backend.app.database.connection import AdminSessionLocal
+from backend.app.models import ClinicalTerm
 
-DATABASE_URL = os.getenv(
-    "DATABASE_URL", "postgresql+psycopg://zahra@localhost:5432/casematch"
-)
 CSV_PATH = Path("data/terminology/terms.csv")
-
-CREATE_SQL = """
-CREATE TABLE IF NOT EXISTS clinical_terms (
-    id SERIAL PRIMARY KEY,
-    preferred_term VARCHAR(255) NOT NULL,
-    synonym VARCHAR(255) NOT NULL UNIQUE,
-    abbreviation VARCHAR(100),
-    terminology_code VARCHAR(100)
-)
-"""
-
-INSERT_SQL = text(
-    "INSERT INTO clinical_terms (preferred_term, synonym, abbreviation, terminology_code) "
-    "VALUES (:p, :s, :a, :c) ON CONFLICT (synonym) DO NOTHING"
-)
+TERMINOLOGY_SYSTEM = "LOCAL"
 
 
 def seed_database():
-    engine = create_engine(DATABASE_URL)
-    inserted = skipped = 0
-    with engine.begin() as conn:
-        conn.execute(text(CREATE_SQL))
-        with open(CSV_PATH, "r", encoding="utf-8-sig") as f:
-            for row in csv.DictReader(f):
+    db = AdminSessionLocal()
+    inserted = 0
+    skipped = 0
+
+    try:
+        # Existing rows, so re-running never creates duplicates.
+        seen = {
+            (t.preferred_term, t.synonym)
+            for t in db.query(ClinicalTerm).all()
+        }
+
+        with open(CSV_PATH, "r", encoding="utf-8-sig", newline="") as file:
+            for row in csv.DictReader(file):
+                preferred = row["preferred_term"].strip()
                 synonym = row["synonym"].strip()
-                if not synonym:
+
+                if not preferred or not synonym:
                     skipped += 1
                     continue
-                result = conn.execute(
-                    INSERT_SQL,
-                    {
-                        "p": row["preferred_term"].strip(),
-                        "s": synonym,
-                        "a": row["abbreviation"].strip() or None,
-                        "c": row["terminology_code"].strip() or None,
-                    },
-                )
-                if result.rowcount:
-                    inserted += 1
-                else:
+
+                key = (preferred, synonym)
+                if key in seen:
                     skipped += 1
-    print(f"Inserted: {inserted}, skipped: {skipped}")
+                    continue
+
+                db.add(
+                    ClinicalTerm(
+                        preferred_term=preferred,
+                        synonym=synonym,
+                        abbreviation=(row.get("abbreviation") or "").strip() or None,
+                        terminology_code=(row.get("terminology_code") or "").strip() or None,
+                        terminology_system=TERMINOLOGY_SYSTEM,
+                    )
+                )
+                seen.add(key)
+                inserted += 1
+
+        db.commit()
+        print(f"Successfully inserted: {inserted}")
+        print(f"Skipped: {skipped}")
+
+    except Exception:
+        db.rollback()
+        raise
+
+    finally:
+        db.close()
 
 
 if __name__ == "__main__":

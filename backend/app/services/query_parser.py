@@ -201,3 +201,7 @@ def parse_query(query: str) -> ParsedQuery:
                 seen.add(key)
                 findings.append(f)
     return ParsedQuery(findings=findings, duration=duration)
+
+
+# Compatibility alias (main's version exported this name)
+parse_clinical_query = parse_query

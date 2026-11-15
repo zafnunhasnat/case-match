@@ -1,144 +1,186 @@
-from datetime import date
+"""Unit tests for keyword_search (no database needed).
 
-import pytest
-from sqlalchemy import text
+These check the SQL structure and the result handling using a fake session.
+Tests that run against a real database live in test_keyword_search_db.py.
+"""
+import uuid
+from datetime import date
+from unittest.mock import MagicMock, patch
 
 from backend.app.services.keyword_search import (
+    Candidate,
     SearchFilters,
-    _get_engine,
+    get_searchable_documents,
     keyword_search,
 )
-from backend.app.services.query_parser import Finding, ParsedQuery, parse_query
+from backend.app.services.query_parser import Finding, ParsedQuery
 
-DEPT = "pytest-keyword"
-BULK = "pytest-keyword-bulk"
-
-# key, status, text, document_type, date
-DOCS = [
-    ("sob", "approved", "Patient reports shortness of breath on exertion.",
-     "progress_note", date(2024, 3, 1)),
-    ("dyspnea", "approved", "Assessment: worsening dyspnea over two days.",
-     "discharge_summary", date(2023, 1, 15)),
-    ("chest", "approved", "Chest pain radiating to the left arm.",
-     "progress_note", date(2024, 5, 10)),
-    ("both", "approved", "Shortness of breath with chest pain at rest.",
-     "progress_note", date(2024, 6, 2)),
-    ("allsyn", "approved",
-     "Dyspnea, shortness of breath and breathlessness noted on admission.",
-     "progress_note", date(2024, 2, 2)),
-    ("draft", "draft", "Severe dyspnea and shortness of breath.",
-     "progress_note", date(2024, 3, 3)),
-    ("rejected", "rejected", "Difficulty breathing and shortness of breath.",
-     "progress_note", date(2024, 3, 4)),
-]
-
-INSERT = text(
-    "INSERT INTO clinical_documents "
-    "(title, screened_text, department, document_type, document_date, status) "
-    "VALUES (:title, :body, :dept, :dtype, :d, :status) RETURNING id"
-)
+PATCH_SESSION = "backend.app.services.keyword_search.SessionLocal"
 
 
-@pytest.fixture(scope="module")
-def seeded():
-    engine = _get_engine()
-    ids = {"bulk": []}
-    with engine.begin() as conn:
-        conn.execute(text("DELETE FROM clinical_documents WHERE department LIKE 'pytest-keyword%'"))
-        for key, status, body, dtype, d in DOCS:
-            ids[key] = conn.execute(
-                INSERT,
-                {"title": key, "body": body, "dept": DEPT, "dtype": dtype, "d": d, "status": status},
-            ).scalar_one()
-        for n in range(60):
-            ids["bulk"].append(
-                conn.execute(
-                    INSERT,
-                    {"title": f"bulk{n}", "body": f"Dyspnea noted, bulk case {n}.",
-                     "dept": BULK, "dtype": "progress_note", "d": date(2024, 1, 1),
-                     "status": "approved"},
-                ).scalar_one()
-            )
-    yield ids
-    with engine.begin() as conn:
-        conn.execute(text("DELETE FROM clinical_documents WHERE department LIKE 'pytest-keyword%'"))
-
-
-def _ids(results):
-    return [c.document_id for c in results]
-
-
-def test_difficulty_breathing_finds_synonym_notes(seeded):
-    results = keyword_search(parse_query("difficulty breathing"))
-    got = {c.document_id: c for c in results}
-    assert seeded["sob"] in got      # "shortness of breath"
-    assert seeded["dyspnea"] in got  # "dyspnea"
-    assert got[seeded["sob"]].matched_via == "synonym"
-    assert got[seeded["sob"]].matched_findings == 1
-    assert got[seeded["sob"]].total_findings == 1
-
-
-def test_unapproved_note_never_appears(seeded):
-    results = keyword_search(parse_query("difficulty breathing"))
-    assert seeded["draft"] not in _ids(results)
-    assert seeded["rejected"] not in _ids(results)
-
-
-def test_finding_counts_once_however_many_synonyms_match(seeded):
-    results = keyword_search(parse_query("difficulty breathing"))
-    matches = [c for c in results if c.document_id == seeded["allsyn"]]
-    assert len(matches) == 1
-    assert matches[0].matched_findings == 1
-
-
-def test_two_findings_rank_first(seeded):
-    results = keyword_search(parse_query("shortness of breath and chest pain"))
-    assert results[0].matched_findings == 2
-    both = next(c for c in results if c.document_id == seeded["both"])
-    assert both.matched_findings == 2 and both.total_findings == 2
-    chest = next(c for c in results if c.document_id == seeded["chest"])
-    assert chest.matched_findings == 1
-
-
-def test_exact_match_reported_as_exact(seeded):
-    results = keyword_search(parse_query("shortness of breath"))
-    got = {c.document_id: c for c in results}
-    assert got[seeded["sob"]].matched_via == "exact"
-    assert got[seeded["dyspnea"]].matched_via == "synonym"
-
-
-def test_snippets_are_highlighted(seeded):
-    results = keyword_search(parse_query("difficulty breathing"))
-    sob = next(c for c in results if c.document_id == seeded["sob"])
-    assert sob.snippets and "<b>" in sob.snippets[0]
-
-
-def test_no_limit_returns_every_match(seeded):
-    results = keyword_search(parse_query("difficulty breathing"))
-    assert set(seeded["bulk"]) <= set(_ids(results))
-
-
-def test_filters(seeded):
-    parsed = parse_query("difficulty breathing")
-    by_dept = keyword_search(parsed, SearchFilters(department=DEPT))
-    assert {c.department for c in by_dept} == {DEPT}
-
-    by_type = keyword_search(parsed, {"department": DEPT, "document_type": "discharge_summary"})
-    assert _ids(by_type) == [seeded["dyspnea"]]
-
-    by_date = keyword_search(
-        parsed, SearchFilters(department=DEPT, date_from=date(2024, 1, 1), date_to=date(2024, 3, 31))
+def finding(text, concept=None, synonyms=None, excluded=False):
+    return Finding(
+        text=text, concept=concept, synonyms=synonyms or [], excluded=excluded
     )
-    assert seeded["sob"] in _ids(by_date)
-    assert seeded["dyspnea"] not in _ids(by_date)
 
 
-def test_excluded_findings_are_not_searched(seeded):
-    assert keyword_search(parse_query("no fever")) == []
+def breathing():
+    return finding(
+        "difficulty breathing", "dyspnea", ["shortness of breath", "sob"]
+    )
 
 
-def test_sql_injection_text_is_harmless(seeded):
-    evil = ParsedQuery(findings=[Finding(text="x'); DROP TABLE clinical_documents; --")])
-    keyword_search(evil)
-    with _get_engine().connect() as conn:
-        assert conn.execute(text("SELECT count(*) FROM clinical_documents")).scalar_one() > 0
+def row(doc_id="doc-1", matched=(True,), exact=(False,), rank=(0.5,),
+        headline=("... <b>dyspnea</b> ...",), department="Cardiology",
+        document_type="progress_note"):
+    data = {
+        "document_id": doc_id,
+        "department": department,
+        "document_type": document_type,
+        "document_date": date(2024, 3, 1),
+    }
+    for i, m in enumerate(matched):
+        data[f"m{i}"] = m
+        data[f"e{i}"] = exact[i]
+        data[f"r{i}"] = rank[i] if m else 0
+        data[f"h{i}"] = headline[i] if m else None
+    return data
+
+
+def fake_session(rows):
+    session = MagicMock()
+    session.execute.return_value.mappings.return_value.all.return_value = rows
+    return session
+
+
+def run(parsed, rows, filters=None):
+    session = fake_session(rows)
+    results = keyword_search(parsed, filters, db=session)
+    sql = str(session.execute.call_args[0][0])
+    params = session.execute.call_args[0][1]
+    return results, sql, params
+
+
+def test_synonym_match_returns_one_candidate_with_counts():
+    parsed = ParsedQuery(findings=[breathing()])
+    results, _, _ = run(parsed, [row()])
+
+    assert len(results) == 1
+    c = results[0]
+    assert isinstance(c, Candidate)
+    assert c.matched_findings == 1
+    assert c.total_findings == 1
+    assert c.matched_texts == ["difficulty breathing"]
+    assert c.matched_via == "synonym"
+    assert "<b>dyspnea</b>" in c.snippets[0]
+
+
+def test_each_synonym_gets_its_own_bound_tsquery_or_ed_together():
+    parsed = ParsedQuery(findings=[breathing()])
+    _, sql, params = run(parsed, [row()])
+
+    assert sql.count("plainto_tsquery('english', :t0_") >= 4
+    assert "||" in sql
+    values = {v for k, v in params.items() if k.startswith("t0_")}
+    assert values == {
+        "difficulty breathing", "dyspnea", "shortness of breath", "sob"
+    }
+
+
+def test_user_text_is_only_ever_a_bound_parameter():
+    evil = "x'); DROP TABLE clinical_documents; --"
+    parsed = ParsedQuery(findings=[finding(evil)])
+    _, sql, params = run(parsed, [])
+
+    assert "DROP TABLE" not in sql
+    assert any("drop table" in str(v).lower() for v in params.values())
+
+
+def test_only_approved_documents_are_searched_and_no_limit():
+    parsed = ParsedQuery(findings=[breathing()])
+    _, sql, _ = run(parsed, [])
+
+    assert "screening_status = 'approved'" in get_searchable_documents()
+    assert "screening_status = 'approved'" in sql
+    assert "LIMIT" not in sql.upper()
+
+
+def test_excluded_findings_are_not_searched():
+    parsed = ParsedQuery(findings=[finding("fever", "fever", excluded=True)])
+    with patch(PATCH_SESSION) as session_factory:
+        assert keyword_search(parsed) == []
+        session_factory.assert_not_called()
+
+
+def test_no_findings_returns_empty_without_touching_the_database():
+    with patch(PATCH_SESSION) as session_factory:
+        assert keyword_search(ParsedQuery(findings=[])) == []
+        session_factory.assert_not_called()
+
+
+def test_filters_are_bound_and_accept_dict_or_model():
+    parsed = ParsedQuery(findings=[breathing()])
+    as_dict = {
+        "department": "Cardiology",
+        "document_type": "discharge_summary",
+        "date_from": "2026-01-01",
+        "date_to": "2026-12-31",
+    }
+    _, sql, params = run(parsed, [], as_dict)
+
+    assert params["f_department"] == "Cardiology"
+    assert params["f_document_type"] == "discharge_summary"
+    assert params["f_date_from"] == date(2026, 1, 1)
+    assert params["f_date_to"] == date(2026, 12, 31)
+    assert "d.department = :f_department" in sql
+    assert "Cardiology" not in sql
+
+    _, _, params2 = run(parsed, [], SearchFilters(department="ER"))
+    assert params2["f_department"] == "ER"
+
+
+def test_documents_matching_more_findings_rank_first():
+    parsed = ParsedQuery(
+        findings=[
+            finding("shortness of breath", "dyspnea"),
+            finding("chest pain", "chest pain"),
+        ]
+    )
+    rows = [
+        row("only-one", matched=(True, False), exact=(True, False),
+            rank=(0.9, 0), headline=("a", None)),
+        row("both", matched=(True, True), exact=(True, True),
+            rank=(0.2, 0.2), headline=("a", "b")),
+    ]
+    results, _, _ = run(parsed, rows)
+
+    assert [c.document_id for c in results] == ["both", "only-one"]
+    assert results[0].matched_findings == 2
+    assert results[0].total_findings == 2
+    assert results[1].matched_findings == 1
+
+
+def test_matched_via_is_exact_when_typed_words_matched():
+    parsed = ParsedQuery(findings=[breathing()])
+    results, _, _ = run(parsed, [row(exact=(True,))])
+    assert results[0].matched_via == "exact"
+
+
+def test_uuid_document_ids_become_strings():
+    parsed = ParsedQuery(findings=[breathing()])
+    doc_id = uuid.uuid4()
+    results, _, _ = run(parsed, [row(doc_id)])
+    assert results[0].document_id == str(doc_id)
+
+
+def test_session_is_closed_only_when_the_function_opened_it():
+    parsed = ParsedQuery(findings=[breathing()])
+
+    own = fake_session([])
+    with patch(PATCH_SESSION, return_value=own):
+        keyword_search(parsed)
+    own.close.assert_called_once()
+
+    injected = fake_session([])
+    keyword_search(parsed, db=injected)
+    injected.close.assert_not_called()

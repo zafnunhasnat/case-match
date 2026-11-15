@@ -11,7 +11,7 @@ fever,feverish,,LOCAL-0002
 cough,hacking cough,,LOCAL-0003
 cough,coughing,,LOCAL-0003
 cough,persistent cough,,LOCAL-0003
-chest pain,chest tightness,,LOCAL-0004
+chest pain,chest tightness,CP,LOCAL-0004
 chest pain,chest discomfort,,LOCAL-0004
 chest pain,pain in chest,,LOCAL-0004
 chest pain,thoracic pain,,LOCAL-0004
@@ -157,3 +157,16 @@ pulmonary embolism,blood clot in lung,PE,LOCAL-0062
 sepsis,blood infection,,LOCAL-0063
 anemia,low hemoglobin,,LOCAL-0064
 anemia,low blood count,,LOCAL-0064
+dyspnea,hard to breathe,,LOCAL-0001
+dyspnea,breathing difficulty,,LOCAL-0001
+chest pain,tightness in chest,,LOCAL-0004
+chest pain,chest pressure,,LOCAL-0004
+fever,running a temperature,,LOCAL-0002
+cough,dry cough,,LOCAL-0003
+fatigue,feeling worn out,,LOCAL-0011
+nausea,upset stomach,,LOCAL-0006
+dizziness,feeling off balance,,LOCAL-0012
+diarrhea,watery stool,,LOCAL-0008
+headache,pounding headache,,LOCAL-0005
+abdominal pain,pain in belly,,LOCAL-0010
+palpitations,heart beating rapidly,,LOCAL-0015

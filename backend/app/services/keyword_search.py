@@ -3,34 +3,44 @@
 One tsquery per finding, built by OR-ing its synonyms, so a finding counts once
 however many synonyms match. All user text goes in as bound parameters.
 No LIMIT: the promise is every relevant case.
+
+Runs on the restricted application connection (SessionLocal), never the admin
+one, and reads only approved, privacy-screened text.
 """
 from __future__ import annotations
 
-import os
 import re
 from datetime import date
 from typing import Literal
 
 from pydantic import BaseModel
-from sqlalchemy import create_engine, text
-from sqlalchemy.engine import Engine
+from sqlalchemy import text
+from sqlalchemy.orm import Session
 
+from backend.app.database.connection import SessionLocal
 from backend.app.services.query_parser import ParsedQuery
 
-DATABASE_URL = os.getenv(
-    "DATABASE_URL", "postgresql+psycopg://zahra@localhost:5432/casematch"
-)
-SEARCHABLE = "get_searchable_documents()"  # approved documents only
 HEADLINE_OPTIONS = "MaxFragments=2"
 
-_engine: Engine | None = None
+# The ONE place that decides what is searchable. Approved, screened text only.
+# If your column or table names differ, change them here and nowhere else.
+SEARCHABLE_SQL = """
+SELECT
+    sd.id               AS id,
+    sd.screened_text    AS screened_text,
+    sd.search_vector    AS search_vector,
+    cd.department       AS department,
+    cd.document_type    AS document_type,
+    cd.created_at       AS document_date
+FROM screened_documents sd
+JOIN clinical_documents cd ON cd.id = sd.clinical_document_id
+WHERE sd.screening_status = 'approved'
+"""
 
 
-def _get_engine() -> Engine:
-    global _engine
-    if _engine is None:
-        _engine = create_engine(DATABASE_URL)
-    return _engine
+def get_searchable_documents() -> str:
+    """SQL for approved, screened documents. Every search reads through this."""
+    return SEARCHABLE_SQL
 
 
 class SearchFilters(BaseModel):
@@ -41,7 +51,7 @@ class SearchFilters(BaseModel):
 
 
 class Candidate(BaseModel):
-    document_id: int
+    document_id: str  # ids are UUIDs, so keep them as strings
     title: str | None = None
     department: str | None = None
     document_type: str | None = None
@@ -113,9 +123,9 @@ def _build_sql(active: list, filters: SearchFilters, params: dict) -> str:
         ]
         any_match.append(f"d.search_vector @@ {q}")
     return (
-        "SELECT d.id AS document_id, d.title, d.department, d.document_type, "
+        "SELECT d.id AS document_id, d.department, d.document_type, "
         "d.document_date, " + ", ".join(select_cols) + " "
-        f"FROM {SEARCHABLE} d "
+        f"FROM ({get_searchable_documents()}) d "
         "WHERE (" + " OR ".join(any_match) + ")" + _filter_sql(filters, params)
     )
 
@@ -123,7 +133,7 @@ def _build_sql(active: list, filters: SearchFilters, params: dict) -> str:
 def keyword_search(
     parsed: ParsedQuery,
     filters: SearchFilters | dict | None = None,
-    engine: Engine | None = None,
+    db: Session | None = None,
 ) -> list[Candidate]:
     """Return every approved document matching at least one non-excluded finding."""
     if isinstance(filters, dict):
@@ -136,16 +146,21 @@ def keyword_search(
 
     params: dict = {}
     sql = _build_sql(active, filters, params)
-    with (engine or _get_engine()).connect() as conn:
-        rows = conn.execute(text(sql), params).mappings().all()
+
+    own_session = db is None
+    session = db or SessionLocal()
+    try:
+        rows = session.execute(text(sql), params).mappings().all()
+    finally:
+        if own_session:
+            session.close()
 
     results: list[Candidate] = []
     for r in rows:
         hit = [i for i in range(len(active)) if r[f"m{i}"]]
         results.append(
             Candidate(
-                document_id=r["document_id"],
-                title=r["title"],
+                document_id=str(r["document_id"]),
                 department=r["department"],
                 document_type=r["document_type"],
                 document_date=r["document_date"],
