@@ -1,221 +1,207 @@
+"""Turn a free-text clinical query into structured findings.
+
+Split on commas / and / but / with, extract noun chunks (spaCy), drop filler
+words, detect negation (medspaCy ConText), extract duration (DATE + regex).
+"""
+from __future__ import annotations
 
 import re
+from functools import lru_cache
 
-import spacy
 from pydantic import BaseModel, Field
 
-from backend.app.services.terminology import normalize
+from backend.app.services.terminology import MIN_FUZZY_LEN, lookup_exact, normalize
 
-
-# Load spaCy
-nlp = spacy.load("en_core_web_sm")
-
-
-# Words that should not be treated as clinical findings
-FILLER_WORDS = {
-    "patient", "patients",
-    "has", "have", "had",
-    "reports", "report", "reported",
-    "experiences", "experiencing",
-    "with", "the", "a", "an",
-    "is", "was", "were",
-    "of", "for", "and", "or", "but",
-    "no", "not", "denies", "denied",
-    "without", "negative"
-}
-
-
-NUMBER_WORDS = {
-    "one": "1", "two": "2", "three": "3",
-    "four": "4", "five": "5", "six": "6",
-    "seven": "7", "eight": "8", "nine": "9",
-    "ten": "10", "eleven": "11", "twelve": "12",
-    "thirteen": "13", "fourteen": "14",
-    "fifteen": "15", "twenty": "20",
-    "thirty": "30"
-}
-
-
-DURATION_PATTERN = re.compile(
-    r"\b(\d+|one|two|three|four|five|six|seven|eight|nine|"
-    r"ten|eleven|twelve|thirteen|fourteen|fifteen|twenty|thirty)"
-    r"\s+(hours?|days?|weeks?|months?|years?)\b",
-    re.IGNORECASE
+SPLIT_RE = re.compile(r",|;|\b(?:and|but|with)\b", re.I)
+NEG_RE = re.compile(
+    r"\b(no|not|denies|denied|denying|without|never|negative for|absence of|free of)\b",
+    re.I,
 )
-
-
-NEGATION_PATTERN = re.compile(
-    r"\b(no|not|denies|denied|without|negative\s+for)\b",
-    re.IGNORECASE
+NUMBER = r"\d+(?:\.\d+)?|an?|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|several|few"
+DURATION_RE = re.compile(
+    rf"\b(?:for\s+|over\s+|since\s+)?(?:the\s+(?:last|past)\s+)?({NUMBER})\s+"
+    r"(hours?|days?|weeks?|months?|years?)\b",
+    re.I,
 )
+DROP_WORDS = {
+    "patient", "patients", "pt", "has", "have", "had", "reports", "report",
+    "reported", "reporting", "complains", "complaining", "complaint", "presents",
+    "presenting", "the", "a", "an", "no", "any", "some", "his", "her", "their",
+    "she", "he", "they", "for", "since", "over", "about", "last", "past", "of",
+    "is", "are", "was", "were",
+}
+MAX_NGRAM = 6
 
 
 class Finding(BaseModel):
     text: str
-    concept: str | None
+    concept: str | None = None
     synonyms: list[str] = Field(default_factory=list)
     excluded: bool = False
 
 
 class ParsedQuery(BaseModel):
-    findings: list[Finding]
+    findings: list[Finding] = Field(default_factory=list)
     duration: str | None = None
 
 
+@lru_cache(maxsize=1)
+def _get_nlps():
+    import spacy
 
-def extract_duration(text: str):
-    # First, check for numeric or written durations.
-    match = DURATION_PATTERN.search(text)
+    base = spacy.load("en_core_web_sm")
+    try:
+        import medspacy
 
-    if match:
-        amount = match.group(1).lower()
-        amount = NUMBER_WORDS.get(amount, amount)
+        ctx = medspacy.load()
+        if not ctx.has_pipe("medspacy_context"):
+            ctx = None
+    except Exception:
+        ctx = None
+    return base, ctx
 
-        return f"{amount} {match.group(2).lower()}"
 
-    # If regex finds nothing, check spaCy DATE entities.
-    doc = nlp(text)
+def split_clauses(text: str) -> list[str]:
+    return [p.strip() for p in SPLIT_RE.split(text) if p and p.strip()]
 
-    for ent in doc.ents:
-        if ent.label_ == "DATE":
-            return ent.text.strip().lower()
 
+def extract_duration(text: str, doc=None) -> str | None:
+    m = DURATION_RE.search(text)
+    if m:
+        return f"{m.group(1)} {m.group(2)}".lower()
+    if doc is not None:
+        for ent in doc.ents:
+            if ent.label_ == "DATE":
+                return ent.text
     return None
 
 
+def _usable(tok) -> bool:
+    return not (tok.is_punct or tok.is_space)
 
-def extract_candidates(text: str):
-    """
-    Find clinical terms directly in the sentence.
 
-    Checks longer phrases first so that terms such as
-    'shortness of breath' are not split into separate words.
-    """
+def _trim(span):
+    doc, start, end = span.doc, span.start, span.end
+    while start < end and (
+        doc[start].lower_ in DROP_WORDS or not _usable(doc[start]) or doc[start].pos_ in {"DET", "PRON"}
+    ):
+        start += 1
+    while end > start and (doc[end - 1].lower_ in DROP_WORDS or not _usable(doc[end - 1])):
+        end -= 1
+    return doc[start:end] if end > start else None
 
-    cleaned = DURATION_PATTERN.sub("", text)
 
-    doc = nlp(cleaned)
-    tokens = [
-        token for token in doc
-        if not token.is_punct and not token.is_space
-    ]
+def _merge_of(doc, spans):
+    out = []
+    for sp in sorted(spans, key=lambda s: s.start):
+        if out and sp.start == out[-1].end + 1 and doc[out[-1].end].lower_ == "of":
+            out[-1] = doc[out[-1].start : sp.end]
+        else:
+            out.append(sp)
+    return out
 
-    candidates = []
-    occupied = set()
 
-    # Check phrases containing up to five words.
-    for size in range(5, 0, -1):
-        for start in range(len(tokens) - size + 1):
-            positions = set(range(start, start + size))
+def _candidate_spans(doc):
+    taken: set[int] = set()
+    spans: list = []
 
-            if positions & occupied:
+    def add(span):
+        spans.append(span)
+        taken.update(range(span.start, span.end))
+
+    n = len(doc)
+    for size in range(min(MAX_NGRAM, n), 0, -1):
+        for i in range(n - size + 1):
+            if taken.intersection(range(i, i + size)):
                 continue
-
-            phrase = doc[tokens[start].i:tokens[start + size - 1].i + 1].text.strip()
-
-            # Skip grammatical filler words as standalone findings.
-            if phrase.lower() in FILLER_WORDS:
+            span = doc[i : i + size]
+            if not (_usable(span[0]) and _usable(span[-1])):
                 continue
+            if span[0].lower_ in DROP_WORDS:
+                continue
+            if lookup_exact(span.text):
+                add(span)
 
-            concept = normalize(phrase)
-
-            if concept is not None:
-                candidates.append(phrase)
-                occupied.update(positions)
-
-    return candidates
-
-
-def is_negated(text: str, finding: str):
-    """
-    Determine whether a finding is negated.
-
-    Examples:
-    No cough -> True
-    No cough but reports fatigue -> cough=True
-    Denies nausea and vomiting -> both=True
-    """
-
-    finding_match = re.search(
-        re.escape(finding),
-        text,
-        re.IGNORECASE
-    )
-
-    if not finding_match:
-        return False
-
-    prefix = text[:finding_match.start()]
-
-    # Find the most recent negation.
-    negations = list(NEGATION_PATTERN.finditer(prefix))
-
-    if not negations:
-        return False
-
-    last_negation = negations[-1]
-
-    # A contrast word ends the negation scope.
-    after_negation = prefix[last_negation.end():]
-
-    if re.search(r"\bbut\b", after_negation, re.IGNORECASE):
-        return False
-
-    return True
-
-
-def parse_query(text: str) -> ParsedQuery:
-
-    duration = extract_duration(text)
-
-    candidates = extract_candidates(text)
-
-    findings = []
-    seen = set()
-
-    for candidate in candidates:
-
-        candidate_doc = nlp(candidate)
-
-        words = [
-            token.text
-            for token in candidate_doc
-            if token.text.lower() not in FILLER_WORDS
-            and not token.is_punct
-            and not token.is_space
-        ]
-
-        phrase = " ".join(words).strip()
-
-        if not phrase or len(phrase) < 3:
+    for tok in doc:
+        if tok.i in taken or tok.is_stop or not _usable(tok):
             continue
-
-        concept = normalize(phrase)
-
-        if concept is None:
+        if tok.lower_ in DROP_WORDS or len(tok.text) < MIN_FUZZY_LEN:
             continue
+        if normalize(tok.text):
+            add(doc[tok.i : tok.i + 1])
 
-        key = concept.lower()
-
-        if key in seen:
+    try:
+        chunks = list(doc.noun_chunks)
+    except ValueError:
+        chunks = []
+    extras = []
+    for chunk in chunks:
+        span = _trim(chunk)
+        if span is None or taken.intersection(range(span.start, span.end)):
             continue
+        extras.append(span)
+    for span in _merge_of(doc, extras):
+        add(span)
+    return sorted(spans, key=lambda s: s.start)
 
-        seen.add(key)
 
-        findings.append(
+def _negation(clause: str, spans, ctx) -> list[bool]:
+    """medspaCy ConText when available, regex fallback otherwise."""
+    if ctx is not None:
+        try:
+            cdoc = ctx(clause)
+            ents = [
+                cdoc.char_span(s.start_char, s.end_char, label="FINDING", alignment_mode="expand")
+                for s in spans
+            ]
+            if all(e is not None for e in ents):
+                cdoc.ents = ents
+                ctx.get_pipe("medspacy_context")(cdoc)
+                return [bool(e._.is_negated) for e in cdoc.ents]
+        except Exception:
+            pass
+    return [bool(NEG_RE.search(clause[: s.start_char])) for s in spans]
+
+
+def _parse_clause(clause: str, base, ctx) -> list[Finding]:
+    doc = base(clause)
+    spans = _candidate_spans(doc)
+    if not spans:
+        return []
+    out = []
+    for span, neg in zip(spans, _negation(clause, spans, ctx)):
+        concept = normalize(span.text)
+        out.append(
             Finding(
-                text=phrase,
-                concept=concept,
-                synonyms=[phrase],
-                excluded=is_negated(text, phrase)
+                text=span.text,
+                concept=concept.preferred_term if concept else None,
+                synonyms=(concept.synonyms + concept.abbreviations) if concept else [],
+                excluded=neg,
             )
         )
-
-    return ParsedQuery(
-        findings=findings,
-        duration=duration
-    )
+    return out
 
 
-# Compatibility alias
+def parse_query(query: str) -> ParsedQuery:
+    base, ctx = _get_nlps()
+    full = base(query)
+    duration = extract_duration(query, full)
+
+    clean = DURATION_RE.sub(" ", query)
+    for ent in full.ents:
+        if ent.label_ == "DATE":
+            clean = clean.replace(ent.text, " ")
+
+    findings: list[Finding] = []
+    seen: set = set()
+    for clause in split_clauses(clean):
+        for f in _parse_clause(clause, base, ctx):
+            key = (f.concept or f.text.lower(), f.excluded)
+            if key not in seen:
+                seen.add(key)
+                findings.append(f)
+    return ParsedQuery(findings=findings, duration=duration)
+
+
+# Compatibility alias (main's version exported this name)
 parse_clinical_query = parse_query

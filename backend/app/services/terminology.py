@@ -1,76 +1,118 @@
+"""Map free-text phrases to a clinical concept.
+
+Starter vocabulary: data/terminology/terms.csv (small, local, no license needed).
+Future upgrade: SNOMED CT / UMLS (both require a license).
+"""
+from __future__ import annotations
+
 import csv
+import re
+from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
-import spacy
-from rapidfuzz import process, fuzz
-from sqlalchemy.orm import Session
-
-from backend.app.models.term import ClinicalTerm
-
-try:
-    nlp = spacy.load("en_core_web_sm")
-except OSError:
-    nlp = spacy.blank("en")
+from pydantic import BaseModel, Field
+from rapidfuzz import fuzz, process
 
 CSV_PATH = Path(__file__).resolve().parents[3] / "data" / "terminology" / "terms.csv"
+FUZZY_THRESHOLD = 90
+MIN_FUZZY_LEN = 5
 
 
-def clean_phrase(phrase: str) -> str:
-    doc = nlp(phrase.lower().strip())
-    words = [
-        token.lemma_.lower() if token.lemma_ else token.text.lower()
-        for token in doc
-        if not token.is_punct and not token.is_space
-    ]
-    return " ".join(words)
+class Concept(BaseModel):
+    preferred_term: str
+    terminology_code: str | None = None
+    synonyms: list[str] = Field(default_factory=list)
+    abbreviations: list[str] = Field(default_factory=list)
+    matched: str
+    method: Literal["exact", "fuzzy"]
+    score: float = 100.0
 
 
-def load_csv_terms():
-    with CSV_PATH.open("r", encoding="utf-8") as file:
-        return list(csv.DictReader(file))
+@lru_cache(maxsize=1)
+def _get_nlp():
+    try:
+        import spacy
+
+        return spacy.load("en_core_web_sm", disable=["parser", "ner"])
+    except Exception:
+        return None
 
 
-def normalize(phrase: str, db: Session | None = None):
-    cleaned = clean_phrase(phrase)
+@lru_cache(maxsize=4096)
+def lemmatize(text: str) -> str:
+    """Lowercase, strip punctuation, lemmatize each word."""
+    text = re.sub(r"[^\w\s/&-]", " ", text.lower())
+    text = " ".join(text.split())
+    nlp = _get_nlp()
+    if nlp is None or not text:
+        return text
+    return " ".join(t.lemma_.lower() for t in nlp(text) if not t.is_space)
 
-    if db is not None:
-        terms = db.query(ClinicalTerm).all()
-        records = [
-            {
-                "preferred_term": term.preferred_term,
-                "synonym": term.synonym,
-                "abbreviation": term.abbreviation or "",
-                "terminology_code": term.terminology_code or "",
-            }
-            for term in terms
-        ]
-    else:
-        records = load_csv_terms()
 
-    for record in records:
-        candidates = [
-            record["preferred_term"].lower(),
-            record["synonym"].lower(),
-        ]
-        if record.get("abbreviation"):
-            candidates.append(record["abbreviation"].lower())
+def load_rows(path: Path = CSV_PATH) -> list[dict]:
+    with open(path, encoding="utf-8-sig", newline="") as f:
+        return list(csv.DictReader(f))
 
-        if cleaned in candidates or phrase.lower().strip() in candidates:
-            return record["preferred_term"]
 
-    choices = {}
-    for record in records:
-        for candidate in (
-            record["preferred_term"],
-            record["synonym"],
-            record.get("abbreviation", ""),
-        ):
-            if candidate:
-                choices[candidate.lower()] = record["preferred_term"]
+@lru_cache(maxsize=1)
+def _build_index():
+    concepts: dict[str, dict] = {}
+    index: dict[str, str] = {}
+    for row in load_rows():
+        pref = row["preferred_term"].strip().lower()
+        syn = row["synonym"].strip().lower()
+        abbr = (row.get("abbreviation") or "").strip()
+        code = (row.get("terminology_code") or "").strip() or None
+        c = concepts.setdefault(pref, {"code": code, "synonyms": [], "abbreviations": []})
+        if code and not c["code"]:
+            c["code"] = code
+        if syn and syn not in c["synonyms"]:
+            c["synonyms"].append(syn)
+        if abbr and abbr not in c["abbreviations"]:
+            c["abbreviations"].append(abbr)
+        for term in (pref, syn, abbr):
+            if term:
+                index.setdefault(lemmatize(term), pref)
+    return concepts, index, list(index)
 
-    match = process.extractOne(cleaned, choices.keys(), scorer=fuzz.ratio)
 
-    if match and match[1] >= 90:
-        return choices[match[0]]
+def _make(pref: str, matched: str, method: str, score: float) -> Concept:
+    concepts, _, _ = _build_index()
+    c = concepts[pref]
+    return Concept(
+        preferred_term=pref,
+        terminology_code=c["code"],
+        synonyms=list(c["synonyms"]),
+        abbreviations=list(c["abbreviations"]),
+        matched=matched,
+        method=method,
+        score=score,
+    )
 
-    return None
+
+def lookup_exact(phrase: str) -> Concept | None:
+    _, index, _ = _build_index()
+    pref = index.get(lemmatize(phrase))
+    return _make(pref, phrase, "exact", 100.0) if pref else None
+
+
+def normalize(phrase: str, db=None) -> Concept | None:
+    """lowercase -> lemma -> exact lookup -> rapidfuzz fallback (threshold 90).
+
+    `db` is accepted so older calls like normalize(phrase, db) still work. It is
+    currently ignored: terms.csv is the single source of truth until the loader
+    that fills the clinical_terms table is the one used at search time.
+    """
+    concept = lookup_exact(phrase)
+    if concept:
+        return concept
+    key = lemmatize(phrase)
+    if len(key) < MIN_FUZZY_LEN:
+        return None
+    _, index, keys = _build_index()
+    hit = process.extractOne(key, keys, scorer=fuzz.ratio, score_cutoff=FUZZY_THRESHOLD)
+    if hit is None:
+        return None
+    match, score, _ = hit
+    return _make(index[match], phrase, "fuzzy", float(score))

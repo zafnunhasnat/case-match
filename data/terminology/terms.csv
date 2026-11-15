@@ -1,148 +1,172 @@
 preferred_term,synonym,abbreviation,terminology_code
-dyspnea,shortness of breath,SOB,267036007
-dyspnea,difficulty breathing,,267036007
-chest pain,chest discomfort,CP,29857009
-fever,pyrexia,,386661006
-fever,high temperature,,386661006
-cough,coughing,,49727002
-fatigue,tiredness,,84229001
-fatigue,exhaustion,,84229001
-nausea,feeling sick,,422587007
-vomiting,emesis,,249497008
-headache,cephalalgia,HA,25064002
-hypertension,high blood pressure,HTN,38341003
-diabetes mellitus,diabetes,DM,73211009
-dizziness,lightheadedness,,404640003
-dizziness,vertigo,,404640003
-abdominal pain,stomach ache,,21522001
-abdominal pain,belly pain,,21522001
-dyspnea,breathlessness,,
-dyspnea,hard to breathe,,
-dyspnea,can't catch my breath,,
-dyspnea,breathing difficulty,,
-dyspnea,labored breathing,,
-chest pain,pain in chest,,
-chest pain,tightness in chest,,
-chest pain,chest pressure,,
-chest pain,chest soreness,,
-chest pain,aching chest,,
-fever,feeling feverish,,
-fever,body temperature elevated,,
-fever,hot and feverish,,
-fever,running a temperature,,
-fever,feeling unusually hot,,
-cough,dry cough,,
-cough,wet cough,,
-cough,persistent coughing,,
-cough,hacking cough,,
-cough,frequent coughing,,
-fatigue,low energy,,
-fatigue,feeling worn out,,
-fatigue,extreme tiredness,,
-fatigue,lack of energy,,
-fatigue,feeling drained,,
-nausea,upset stomach,,
-nausea,queasy feeling,,
-nausea,feeling like throwing up,,
-nausea,sick to my stomach,,
-nausea,stomach queasiness,,
-vomiting,throwing up,,
-vomiting,being sick,,
-vomiting,bringing up food,,
-vomiting,repeated vomiting,,
-vomiting,stomach contents coming up,,
-headache,head pain,,
-headache,pain in head,,
-headache,throbbing head,,
-headache,pressure in head,,
-headache,pounding headache,,
-dizziness,feeling faint,,
-dizziness,unsteady feeling,,
-dizziness,spinning sensation,,
-dizziness,feeling off balance,,
-dizziness,room spinning,,
-abdominal pain,stomach pain,,
-abdominal pain,pain in belly,,
-abdominal pain,cramping stomach,,
-abdominal pain,lower stomach pain,,
-abdominal pain,upper abdominal discomfort,,
-back pain,pain in back,,
-back pain,lower back pain,,
-back pain,upper back pain,,
-back pain,aching back,,
-back pain,back soreness,,
-diarrhea,loose stools,,
-diarrhea,watery stool,,
-diarrhea,frequent loose bowel movements,,
-diarrhea,runny stool,,
-diarrhea,frequent diarrhea,,
-constipation,difficulty passing stool,,
-constipation,hard stools,,
-constipation,infrequent bowel movements,,
-constipation,trouble having a bowel movement,,
-constipation,unable to pass stool,,
-sore throat,throat pain,,
-sore throat,painful throat,,
-sore throat,scratchy throat,,
-sore throat,throat irritation,,
-sore throat,difficulty swallowing due to throat pain,,
-nasal congestion,stuffy nose,,
-nasal congestion,blocked nose,,
-nasal congestion,nasal blockage,,
-nasal congestion,nose feels congested,,
-nasal congestion,difficulty breathing through nose,,
-runny nose,nose running,,
-runny nose,nasal discharge,,
-runny nose,dripping nose,,
-runny nose,excess mucus from nose,,
-runny nose,watery nasal discharge,,
-palpitations,racing heart,,
-palpitations,heart pounding,,
-palpitations,fluttering heartbeat,,
-palpitations,irregular heartbeat sensation,,
-palpitations,heart beating rapidly,,
-edema,swelling,,
-edema,swollen ankles,,
-edema,swollen feet,,
-edema,fluid swelling,,
-edema,puffiness,,
-rash,skin eruption,,
-rash,red skin spots,,
-rash,skin redness,,
-rash,skin breakout,,
-rash,patchy skin irritation,,
-pruritus,itchy skin,,
-pruritus,skin itching,,
-pruritus,constant itching,,
-pruritus,itchiness,,
-pruritus,itchy patches,,
-arthralgia,joint pain,,
-arthralgia,aching joints,,
-arthralgia,painful joints,,
-arthralgia,sore joints,,
-arthralgia,joint soreness,,
-myalgia,muscle pain,,
-myalgia,aching muscles,,
-myalgia,sore muscles,,
-myalgia,muscle soreness,,
-myalgia,body muscle aches,,
-weakness,feeling weak,,
-weakness,lack of strength,,
-weakness,general weakness,,
-weakness,reduced muscle strength,,
-weakness,body weakness,,
-dysuria,painful urination,,
-dysuria,burning when urinating,,
-dysuria,burning urination,,
-dysuria,pain while passing urine,,
-dysuria,urination discomfort,,
-urinary frequency,frequent urination,,
-urinary frequency,needing to pee often,,
-urinary frequency,urinating frequently,,
-urinary frequency,constant need to urinate,,
-urinary frequency,passing urine often,,
-blurred vision,blurry eyesight,,
-blurred vision,unclear vision,,
-blurred vision,fuzzy vision,,
-blurred vision,vision out of focus,,
-blurred vision,difficulty seeing clearly,,
+dyspnea,shortness of breath,SOB,LOCAL-0001
+dyspnea,difficulty breathing,,LOCAL-0001
+dyspnea,breathlessness,,LOCAL-0001
+dyspnea,trouble breathing,,LOCAL-0001
+dyspnea,labored breathing,,LOCAL-0001
+fever,pyrexia,,LOCAL-0002
+fever,high temperature,,LOCAL-0002
+fever,febrile,,LOCAL-0002
+fever,feverish,,LOCAL-0002
+cough,hacking cough,,LOCAL-0003
+cough,coughing,,LOCAL-0003
+cough,persistent cough,,LOCAL-0003
+chest pain,chest tightness,CP,LOCAL-0004
+chest pain,chest discomfort,,LOCAL-0004
+chest pain,pain in chest,,LOCAL-0004
+chest pain,thoracic pain,,LOCAL-0004
+headache,cephalalgia,HA,LOCAL-0005
+headache,head pain,,LOCAL-0005
+headache,head ache,,LOCAL-0005
+nausea,queasiness,,LOCAL-0006
+nausea,feeling sick,,LOCAL-0006
+nausea,sick to stomach,,LOCAL-0006
+vomiting,emesis,,LOCAL-0007
+vomiting,throwing up,,LOCAL-0007
+vomiting,puking,,LOCAL-0007
+diarrhea,loose stools,,LOCAL-0008
+diarrhea,watery stools,,LOCAL-0008
+diarrhea,frequent stools,,LOCAL-0008
+constipation,difficulty passing stool,,LOCAL-0009
+constipation,hard stools,,LOCAL-0009
+constipation,infrequent bowel movements,,LOCAL-0009
+abdominal pain,stomach pain,abd pain,LOCAL-0010
+abdominal pain,belly pain,,LOCAL-0010
+abdominal pain,stomach ache,,LOCAL-0010
+abdominal pain,abdominal cramps,,LOCAL-0010
+fatigue,tiredness,,LOCAL-0011
+fatigue,exhaustion,,LOCAL-0011
+fatigue,lethargy,,LOCAL-0011
+fatigue,low energy,,LOCAL-0011
+dizziness,lightheadedness,,LOCAL-0012
+dizziness,giddiness,,LOCAL-0012
+dizziness,feeling faint,,LOCAL-0012
+vertigo,spinning sensation,,LOCAL-0013
+vertigo,room spinning,,LOCAL-0013
+syncope,fainting,,LOCAL-0014
+syncope,passing out,,LOCAL-0014
+syncope,loss of consciousness,LOC,LOCAL-0014
+syncope,blackout,,LOCAL-0014
+palpitations,heart racing,,LOCAL-0015
+palpitations,racing heart,,LOCAL-0015
+palpitations,fluttering heart,,LOCAL-0015
+palpitations,heart pounding,,LOCAL-0015
+tachycardia,fast heart rate,,LOCAL-0016
+tachycardia,rapid heartbeat,,LOCAL-0016
+tachycardia,elevated heart rate,,LOCAL-0016
+hypertension,high blood pressure,HTN,LOCAL-0017
+hypertension,elevated blood pressure,,LOCAL-0017
+hypotension,low blood pressure,,LOCAL-0018
+myocardial infarction,heart attack,MI,LOCAL-0019
+myocardial infarction,cardiac infarction,,LOCAL-0019
+diabetes mellitus,diabetes,DM,LOCAL-0020
+diabetes mellitus,sugar diabetes,,LOCAL-0020
+hyperglycemia,high blood sugar,,LOCAL-0021
+hyperglycemia,elevated glucose,,LOCAL-0021
+hypoglycemia,low blood sugar,,LOCAL-0022
+hypoglycemia,low glucose,,LOCAL-0022
+edema,swelling,,LOCAL-0023
+edema,fluid retention,,LOCAL-0023
+edema,puffiness,,LOCAL-0023
+peripheral edema,leg swelling,,LOCAL-0024
+peripheral edema,swollen legs,,LOCAL-0024
+peripheral edema,swollen ankles,,LOCAL-0024
+rash,skin rash,,LOCAL-0025
+rash,skin eruption,,LOCAL-0025
+rash,red spots,,LOCAL-0025
+pruritus,itching,,LOCAL-0026
+pruritus,itchy skin,,LOCAL-0026
+sore throat,throat pain,,LOCAL-0027
+sore throat,painful throat,,LOCAL-0027
+sore throat,scratchy throat,,LOCAL-0027
+rhinorrhea,runny nose,,LOCAL-0028
+rhinorrhea,nasal discharge,,LOCAL-0028
+nasal congestion,stuffy nose,,LOCAL-0029
+nasal congestion,blocked nose,,LOCAL-0029
+wheezing,whistling breathing,,LOCAL-0030
+wheezing,wheeze,,LOCAL-0030
+hemoptysis,coughing up blood,,LOCAL-0031
+hemoptysis,blood in sputum,,LOCAL-0031
+hematuria,blood in urine,,LOCAL-0032
+hematuria,bloody urine,,LOCAL-0032
+dysuria,painful urination,,LOCAL-0033
+dysuria,burning urination,,LOCAL-0033
+dysuria,burning on urination,,LOCAL-0033
+urinary frequency,frequent urination,,LOCAL-0034
+urinary frequency,urinating often,,LOCAL-0034
+back pain,backache,,LOCAL-0035
+back pain,lower back pain,LBP,LOCAL-0035
+back pain,lumbago,,LOCAL-0035
+joint pain,arthralgia,,LOCAL-0036
+joint pain,painful joints,,LOCAL-0036
+joint pain,achy joints,,LOCAL-0036
+muscle pain,myalgia,,LOCAL-0037
+muscle pain,muscle aches,,LOCAL-0037
+muscle pain,body aches,,LOCAL-0037
+weight loss,losing weight,,LOCAL-0038
+weight loss,unintentional weight loss,,LOCAL-0038
+weight loss,unexplained weight loss,,LOCAL-0038
+loss of appetite,decreased appetite,,LOCAL-0039
+loss of appetite,poor appetite,,LOCAL-0039
+loss of appetite,reduced appetite,,LOCAL-0039
+chills,shivering,,LOCAL-0040
+chills,rigors,,LOCAL-0040
+night sweats,nocturnal sweating,,LOCAL-0041
+night sweats,sweating at night,,LOCAL-0041
+insomnia,trouble sleeping,,LOCAL-0042
+insomnia,difficulty sleeping,,LOCAL-0042
+insomnia,sleeplessness,,LOCAL-0042
+anxiety,nervousness,,LOCAL-0043
+anxiety,feeling anxious,,LOCAL-0043
+depression,low mood,,LOCAL-0044
+depression,depressed mood,,LOCAL-0044
+depression,feeling down,,LOCAL-0044
+confusion,disorientation,,LOCAL-0045
+confusion,altered mental status,AMS,LOCAL-0045
+seizure,convulsion,,LOCAL-0046
+seizure,epileptic fit,,LOCAL-0046
+tremor,shaking,,LOCAL-0047
+tremor,trembling,,LOCAL-0047
+numbness,loss of sensation,,LOCAL-0048
+paresthesia,tingling,,LOCAL-0049
+weakness,muscle weakness,,LOCAL-0050
+weakness,generalized weakness,,LOCAL-0050
+weakness,feeling weak,,LOCAL-0050
+blurred vision,blurry vision,,LOCAL-0051
+blurred vision,fuzzy vision,,LOCAL-0051
+jaundice,yellow skin,,LOCAL-0052
+jaundice,yellowing of skin,,LOCAL-0052
+jaundice,icterus,,LOCAL-0052
+dysphagia,difficulty swallowing,,LOCAL-0053
+dysphagia,trouble swallowing,,LOCAL-0053
+gastroesophageal reflux,acid reflux,GERD,LOCAL-0054
+gastroesophageal reflux,heartburn,,LOCAL-0054
+gastroesophageal reflux,reflux,,LOCAL-0054
+pneumonia,lung infection,,LOCAL-0055
+pneumonia,chest infection,,LOCAL-0055
+urinary tract infection,bladder infection,UTI,LOCAL-0056
+chronic obstructive pulmonary disease,chronic lung disease,COPD,LOCAL-0057
+congestive heart failure,heart failure,CHF,LOCAL-0058
+congestive heart failure,cardiac failure,,LOCAL-0058
+atrial fibrillation,irregular heartbeat,AF,LOCAL-0059
+atrial fibrillation,irregular heart rhythm,,LOCAL-0059
+stroke,cerebrovascular accident,CVA,LOCAL-0060
+stroke,brain attack,,LOCAL-0060
+deep vein thrombosis,blood clot in leg,DVT,LOCAL-0061
+pulmonary embolism,blood clot in lung,PE,LOCAL-0062
+sepsis,blood infection,,LOCAL-0063
+anemia,low hemoglobin,,LOCAL-0064
+anemia,low blood count,,LOCAL-0064
+dyspnea,hard to breathe,,LOCAL-0001
+dyspnea,breathing difficulty,,LOCAL-0001
+chest pain,tightness in chest,,LOCAL-0004
+chest pain,chest pressure,,LOCAL-0004
+fever,running a temperature,,LOCAL-0002
+cough,dry cough,,LOCAL-0003
+fatigue,feeling worn out,,LOCAL-0011
+nausea,upset stomach,,LOCAL-0006
+dizziness,feeling off balance,,LOCAL-0012
+diarrhea,watery stool,,LOCAL-0008
+headache,pounding headache,,LOCAL-0005
+abdominal pain,pain in belly,,LOCAL-0010
+palpitations,heart beating rapidly,,LOCAL-0015
