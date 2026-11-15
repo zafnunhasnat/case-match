@@ -1,0 +1,50 @@
+[
+  {
+    "department": "Emergency Medicine",
+    "id": "DOC-001",
+    "name": "Allison Hill",
+    "role": "Attending Physician"
+  },
+  {
+    "department": "Emergency Medicine",
+    "id": "DOC-002",
+    "name": "Noah Rhodes",
+    "role": "Resident Physician"
+  },
+  {
+    "department": "Internal Medicine",
+    "id": "DOC-003",
+    "name": "Angie Henderson",
+    "role": "Attending Physician"
+  },
+  {
+    "department": "Internal Medicine",
+    "id": "DOC-004",
+    "name": "Daniel Wagner",
+    "role": "Resident Physician"
+  },
+  {
+    "department": "Pediatrics",
+    "id": "DOC-005",
+    "name": "Cristian Santos",
+    "role": "Attending Physician"
+  },
+  {
+    "department": "Pediatrics",
+    "id": "DOC-006",
+    "name": "Connie Lawrence",
+    "role": "Pediatric Resident"
+  },
+  {
+    "department": "Cardiology",
+    "id": "DOC-007",
+    "name": "Abigail Shaffer",
+    "role": "Cardiology Fellow"
+  },
+  {
+    "department": "Cardiology",
+    "id": "DOC-008",
+    "name": "Gina Moore",
+    "role": "Attending Cardiologist"
+  }
+]
